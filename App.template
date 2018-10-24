@@ -1,0 +1,1021 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+
+	"Description": "2015-02-10 - Creates : (Embedded IAM EC2Role, optional EIP), ASG, LC, ELB, SGs. Configures Magento EC2",
+
+	"Parameters": {
+
+		"DeviceId": {
+			"Description": "Enter the DeviceId to tag on the stack and it's components",
+			"Type": "String",
+			"AllowedPattern": "[\\x20-\\x7E]*"
+		},
+
+		"SnsArn": {
+			"Description": "Enter the SNS ARN (as seen in the Outputs of Integrations CloudFormation stack)",
+			"Type": "String",
+			"AllowedPattern": "[\\x20-\\x7E]*"
+		},
+
+		"KeyName": {
+			"Description": "Enter the name of an EXISTING EC2 KeyPair to enable SSH access to the instances",
+			"Type": "String",
+			"MinLength": "1",
+			"MaxLength": "255",
+			"AllowedPattern": "[\\x20-\\x7E]*",
+			"ConstraintDescription": "Value can contain ONLY ASCII characters"
+		},
+
+		"NfsEipFqdn": {
+			"Default": "#ec2-XXX-XXX-XXX-XXX.compute-1.amazonaws.com",
+			"Description": "Enter the FQDN of the NFS server (as seen in the Elastic IP section of the EC2 dashboard)",
+			"Type": "String",
+			"AllowedPattern": "[\\x20-\\x7E]*"
+		},
+
+		"CustomerIP": {
+			"Default": "192.168.0.254/32",
+			"Description": "The IP address range that can be used to SSH to the EC2 instances",
+			"Type": "String",
+			"MinLength": "9",
+			"MaxLength": "18",
+			"AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+			"ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+		},
+
+		"SecGrpAccessIdServices": {
+			"Default": "sg-xxxxxxxx",
+			"Description": "Enter the SecurityGroupIDConsumer (as seen in the output of the AccessSecurityGroup creation stack)",
+			"Type": "String",
+			"MinLength": "11",
+			"MaxLength": "15",
+			"AllowedPattern": "[\\x20-\\x7E]*",
+			"ConstraintDescription": "Value can contain ONLY 11-15 ASCII characters"
+		},
+
+		"SecGrpAccessIdBastion": {
+			"Default": "sg-xxxxxxxx",
+			"Description": "Enter the SecGrpAccessIdBastion (as seen in the output of the AccessSecurityGroup creation stack)",
+			"Type": "String",
+			"MinLength": "11",
+			"MaxLength": "15",
+			"AllowedPattern": "[\\x20-\\x7E]*",
+			"ConstraintDescription": "Value can contain ONLY 11-15 ASCII characters"
+		},
+
+		"SecGrpAccessIdTenzing": {
+			"Default": "sg-xxxxxxxx",
+			"Description": "Enter the ID of the existing TenzingSecurityGroupID (as seen in the output of the AccessSecurityGroup creation stack)",
+			"Type": "String",
+			"MinLength": "11",
+			"MaxLength": "15",
+			"AllowedPattern": "[\\x20-\\x7E]*",
+			"ConstraintDescription": "Value can contain only 11-15 ASCII characters."
+		},
+
+		"SecGrpAccessIdCustomer": {
+			"Default": "sg-xxxxxxxx",
+			"Description": "Enter the ID of the existing Customer Security Group (as seen in the output of the AccessSecurityGroup creation stack)",
+			"Type": "String",
+			"MinLength": "11",
+			"MaxLength": "15",
+			"AllowedPattern": "[\\x20-\\x7E]*",
+			"ConstraintDescription": "Value can contain only 11-15 ASCII characters."
+		},
+
+		"WebServerCapacityInit": {
+			"Default": "1",
+			"Description": "Enter the desired number of WebServer instances (no changes to defaults required in most cases)",
+			"Type": "Number",
+			"MinValue": "1",
+			"MaxValue": "10",
+			"ConstraintDescription": "Value must be between 1 and 10 EC2 instances"
+		},
+
+		"WebServerCapacityMin": {
+			"Default": "1",
+			"Description": "Enter the minimum number of WebServer instances (no changes to defaults requried in most cases)",
+			"Type": "Number",
+			"MinValue": "1",
+			"MaxValue": "10",
+			"ConstraintDescription": "Value must be between 1 and 10 EC2 instances"
+		},
+
+		"WebServerCapacityMax": {
+			"Default": "1",
+			"Description": "Enter the the maxiumum number of WebServer instances (no changes to defaults requried in most cases)",
+			"Type": "Number",
+			"MinValue": "1",
+			"MaxValue": "10",
+			"ConstraintDescription": "Value must be between 1 and 10 EC2 instances"
+		},
+
+		"InstanceType": {
+			"Default": "c3.2xlarge",
+			"Description": "Enter the WebServer EC2 instance type",
+			"Type": "String",
+			"AllowedValues": ["t1.micro", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge"],
+			"ConstraintDescription": "Selection must be a valid EC2 instance type"
+		},
+
+		"EnableEbsOptimized": {
+			"Default": "yes",
+			"Description": "Indicate 'yes' for an EBS-Optimized volume, or 'no' if not. NOTE - not all instance types support the EBS-Optimized option",
+			"Type": "String",
+			"AllowedValues": ["yes", "no"],
+			"ConstraintDescription": "Value must be either 'yes', or 'no'"
+		},
+
+		"EnableReservedInstances": {
+			"Default": "no",
+			"Description": "Indicate 'yes' if EC2 Reserved Instances are requried, or 'no' if not. NOTE - reservations MUST be purchased PRIOR to instance deployment",
+			"Type": "String",
+			"AllowedValues": ["yes", "no"],
+			"ConstraintDescription": "Value must be either 'yes', or 'no'"
+		},
+
+		"ReservedAz": {
+			"Default": "us-east-1b",
+			"Description": "IF applicable, specify the Availability Zone (AZ) where the Reserved Instance purchased will be applied, for instance us-east-1b",
+			"Type": "String"
+		},
+
+		"BackUpInterval": {
+			"Default": "daily",
+			"Description": "Specify whether the backup interval will be 'hourly or 'daily'",
+			"Type": "String",
+			"AllowedValues": ["hourly", "daily"],
+			"ConstraintDescription": "Value must be either 'hourly or 'daily'"
+		},
+
+		"BackUpRetention": {
+			"Default": "7",
+			"Description": "Specify backup retention period in days. Acceptable values are 7, 14, or 30",
+			"Type": "String",
+			"AllowedValues": ["7", "14", "30"],
+			"ConstraintDescription": "Value must be 7, 14, or 30 days"
+		},
+
+		"LoginPassword": {
+			"Description": "Enter a password for login via the ec2-user account. It must be a minimum of 8 characters",
+			"Type": "String",
+			"NoEcho": "TRUE",
+			"AllowedPattern": "[\\x20-\\x7E]*",
+			"MinLength": "8"
+		},
+
+		"TwoFactorAuth": {
+			"Default": "no",
+			"Description": "Use Public Key AND password authentication",
+			"Type": "String",
+			"AllowedValues": ["yes", "no"],
+			"ConstraintDescription": "Value must be 'yes', or 'no'"
+		},
+
+		"EndpointMySQL": {
+			"Default": "PLEASE.CHANGE.ME.us-east-1b.rds.amazonaws.com",
+			"Description": "Enter endpoint information of MySQL RDS",
+			"Type": "String",
+			"AllowedPattern": "[\\x20-\\x7E]*"
+		},
+
+		"EndpointPortRedis": {
+			"Default": "PLEASE.CHANGE.ME.0001.use1.cache.amazonaws.com:6379",
+			"Description": "Enter endpoint AND port information of any Elasticache / Redis instances (if applicable)",
+			"Type": "String",
+			"AllowedPattern": "[\\x20-\\x7E]*"
+		},
+
+		"EndpointPortMemcached": {
+			"Default": "PLEASE.CHANGE.ME.cfg.use1.cache.amazonaws.com:11211",
+			"Description": "Enter endpoint AND port information of any Elasticache / Memcached instances (if applicable)",
+			"Type": "String",
+			"AllowedPattern": "[\\x20-\\x7E]*"
+		},
+
+		"AssumeBastionRole": {
+			"Description": "Indicate 'yes' to assume bastion functionality; indicate 'no' if there is a bastion instance deployed within this stack",
+			"Type": "String",
+			"AllowedValues": ["yes", "no"],
+			"ConstraintDescription": "Value must be either 'yes', or 'no'"
+		},
+
+		"MediaVolSize": {
+			"Default": "25",
+			"Description": "Enter desired size of media volume",
+			"Type": "String"
+		},
+		
+		"SiteNames": {
+			"Description": "Enter sitenames correspondent to ELBs separated by commas for example magstore.bobsdonuts.be,magstore.tenzing.com,magstore.magaws.ca that will result in [\"magstore.bobsdonuts.be\",\"magstore.tenzing.com\",\"magstore.magaws.ca\"]",
+			"Type": "CommaDelimitedList"
+		}
+	},
+
+	"Conditions": {
+		"UseEbsOp": {
+			"Fn::Equals": [{
+				"Ref": "EnableEbsOptimized"
+			}, "yes"]
+		},
+		"UseResIn": {
+			"Fn::Equals": [{
+				"Ref": "EnableReservedInstances"
+			}, "yes"]
+		},
+		"NoBastion": {
+			"Fn::Equals": [{
+				"Ref": "AssumeBastionRole"
+			}, "yes"]
+		}
+	},
+
+
+	"Mappings": {
+		"AWSInstanceType2Arch": {
+			"t1.micro": {
+				"Arch": "64"
+			},
+			"c4.large": {
+				"Arch": "64HVM"
+			},
+			"c4.xlarge": {
+				"Arch": "64HVM"
+			},
+			"c4.2xlarge": {
+				"Arch": "64HVM"
+			},
+			"c4.4xlarge": {
+				"Arch": "64HVM"
+			},
+			"c4.8xlarge": {
+				"Arch": "64HVM"
+			},
+			"c3.large": {
+				"Arch": "64"
+			},
+			"c3.xlarge": {
+				"Arch": "64"
+			},
+			"c3.2xlarge": {
+				"Arch": "64"
+			},
+			"c3.4xlarge": {
+				"Arch": "64"
+			},
+			"c3.8xlarge": {
+				"Arch": "64"
+			},
+			"m3.medium": {
+				"Arch": "64"
+			},
+			"m3.large": {
+				"Arch": "64"
+			},
+			"m3.xlarge": {
+				"Arch": "64"
+			},
+			"m3.2xlarge": {
+				"Arch": "64"
+			}
+		},
+
+		"AWSRegionArch2AMI": {
+			"us-east-1": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"us-west-2": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"us-west-1": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"eu-west-1": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"ap-southeast-1": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"ap-southeast-2": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"ap-northeast-1": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			},
+			"sa-east-1": {
+				"32": "NOT_YET_SUPPORTED",
+				"64": "ami-1a889a7b",
+				"64HVM": "NOT_YET_SUPPORTED"
+			}
+		}
+	},
+
+	"Resources": {
+
+		"StackIamEc2Roles": {
+			"Type": "AWS::CloudFormation::Stack",
+			"Properties": {
+				"TemplateURL": {
+					"Fn::If": [
+						"NoBastion",
+						"https://s3.amazonaws.com/magento_source/IamEc2MpMgmtRole.json",
+						"https://s3.amazonaws.com/tenzingmainpubrepo/cfn/IamEc2Roles.json"
+					]
+				}
+			}
+		},
+
+		"ElasticLoadBalancer": {
+			"Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+			"Metadata": {
+				"Comment": "Configure the Load Balancer with a simple health check"
+			},
+			"Properties": {
+				"AvailabilityZones": {
+					"Fn::GetAZs": ""
+				},
+				"Listeners": [{
+					"LoadBalancerPort": "80",
+					"InstancePort": "80",
+					"Protocol": "HTTP"
+				}],
+				"CrossZone": "true",
+				"ConnectionSettings": {
+					"IdleTimeout": "600"
+				},
+				"HealthCheck": {
+					"Target": "http:80/tenzing/index.htm",
+					"HealthyThreshold": "2",
+					"UnhealthyThreshold": "5",
+					"Interval": "10",
+					"Timeout": "5"
+				},
+				"SecurityGroups": [{
+					"Fn::GetAtt": ["SecGrpServerElb", "GroupId"]
+				}]
+			}
+		},
+		
+		"WebServerScaleUpPolicy": {
+			"Type": "AWS::AutoScaling::ScalingPolicy",
+			"Properties": {
+				"AdjustmentType": "ChangeInCapacity",
+				"AutoScalingGroupName": {
+					"Ref": "WebServerGroup"
+				},
+				"Cooldown": "60",
+				"ScalingAdjustment": "1"
+			}
+		},
+
+		"WebServerScaleDownPolicy": {
+			"Type": "AWS::AutoScaling::ScalingPolicy",
+			"Properties": {
+				"AdjustmentType": "ChangeInCapacity",
+				"AutoScalingGroupName": {
+					"Ref": "WebServerGroup"
+				},
+				"Cooldown": "60",
+				"ScalingAdjustment": "-1"
+			}
+		},
+
+		"CPUAlarmHigh": {
+			"Type": "AWS::CloudWatch::Alarm",
+			"Properties": {
+				"AlarmName": {
+					"Fn::Join": ["_", ["CPUAlarmHigh", {
+						"Ref": "WebServerGroup"
+					}]]
+				}, 
+				"AlarmDescription": "Scale-up if CPU > 65% for 4 minutes",
+				"MetricName": "CPUUtilization",
+				"Namespace": "AWS/EC2",
+				"Statistic": "Average",
+				"Period": "120",
+				"EvaluationPeriods": "2",
+				"Threshold": "65",
+				"AlarmActions": [{
+					"Ref": "WebServerScaleUpPolicy"
+				}],
+				"Dimensions": [{
+					"Name": "AutoScalingGroupName",
+					"Value": {
+						"Ref": "WebServerGroup"
+					}
+				}],
+				"ComparisonOperator": "GreaterThanThreshold"
+			}
+		},
+
+		"CPUAlarmLow": {
+			"Type": "AWS::CloudWatch::Alarm",
+			"Properties": {
+				"AlarmName": {
+					"Fn::Join": ["_", ["CPUAlarmLow", {
+						"Ref": "WebServerGroup"
+					}]]
+				}, 
+				"AlarmDescription": "Scale-down if CPU < 55% for 4 minutes",
+				"MetricName": "CPUUtilization",
+				"Namespace": "AWS/EC2",
+				"Statistic": "Average",
+				"Period": "120",
+				"EvaluationPeriods": "2",
+				"Threshold": "55",
+				"AlarmActions": [{
+					"Ref": "WebServerScaleDownPolicy"
+				}],
+				"Dimensions": [{
+					"Name": "AutoScalingGroupName",
+					"Value": {
+						"Ref": "WebServerGroup"
+					}
+				}],
+				"ComparisonOperator": "LessThanThreshold"
+			}
+		},
+
+		"WebServerGroup": {
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Properties": {
+
+				"AvailabilityZones": {
+					"Fn::If": ["UseResIn", [{
+						"Ref": "ReservedAz"
+					}], {
+						"Fn::GetAZs": ""
+					}]
+				},
+
+				"LaunchConfigurationName": {
+					"Ref": "LaunchConfig"
+				},
+				"DesiredCapacity": {
+					"Ref": "WebServerCapacityInit"
+				},
+				"MinSize": {
+					"Ref": "WebServerCapacityMin"
+				},
+				"MaxSize": {
+					"Ref": "WebServerCapacityMax"
+				},
+				"LoadBalancerNames": [{
+					"Ref": "ElasticLoadBalancer"
+				}],
+				"HealthCheckType": "ELB", 
+				"HealthCheckGracePeriod": "600",
+				"MetricsCollection": [{
+					"Granularity": "1Minute",
+					"Metrics": [
+						"GroupInServiceInstances",
+						"GroupTotalInstances"
+					]
+				}],
+				"Tags": [{
+					"Key": "DeviceId",
+					"Value": {
+						"Ref": "DeviceId"
+					},
+					"PropagateAtLaunch": "true"
+				}, {
+					"Key": "Name",
+					"Value": "App",
+					"PropagateAtLaunch": "true"
+				}]
+			}
+		},
+
+		"SecGrpServerWeb": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupDescription": "Enable HTTP access via port 80 (SSL offloaded at ELB) from resources belonging to approriate SGs",
+				"SecurityGroupIngress": [{
+					"IpProtocol": "tcp",
+					"FromPort": "80",
+					"ToPort": "80",
+					"CidrIp": {
+						"Ref": "CustomerIP"
+					}
+				}, {
+					"IpProtocol": "tcp",
+					"FromPort": "22",
+					"ToPort": "22",
+					"SourceSecurityGroupId": {
+						"Ref": "SecGrpAccessIdBastion"
+					}
+				}, {
+					"IpProtocol": "icmp",
+					"FromPort": "-1",
+					"ToPort": "-1",
+					"SourceSecurityGroupId": {
+						"Ref": "SecGrpAccessIdBastion"
+					}
+				}, {
+					"IpProtocol": "tcp",
+					"FromPort": "80",
+					"ToPort": "80",
+					"SourceSecurityGroupOwnerId": {
+						"Fn::GetAtt": ["ElasticLoadBalancer", "SourceSecurityGroup.OwnerAlias"]
+					},
+					"SourceSecurityGroupName": {
+						"Fn::GetAtt": ["ElasticLoadBalancer", "SourceSecurityGroup.GroupName"]
+					}
+				}]
+			}
+		},
+
+		"SecGrpServerElb": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupDescription": "Enable HTTP/S access via port 80 and 443",
+				"SecurityGroupIngress": [{
+					"IpProtocol": "tcp",
+					"FromPort": "80",
+					"ToPort": "80",
+					"CidrIp": "0.0.0.0/0"
+				}, {
+					"IpProtocol": "tcp",
+					"FromPort": "443",
+					"ToPort": "443",
+					"CidrIp": "0.0.0.0/0"
+				}]
+			}
+		},
+
+		"LaunchConfig": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
+
+			"Metadata": {
+
+				"Comment1": "Configure the bootstrap helpers - placeholder",
+				"Comment2": "The website content is downloaded from from an s3 bucket via boto",
+
+				"AWS::CloudFormation::Init": {
+					"config": {
+						"packages": {
+							"yum": {
+								"ntp": [],
+								"dos2unix": []
+							}
+						}
+					}
+				}
+			},
+
+			"Properties": {
+				"ImageId": {
+					"Fn::FindInMap": ["AWSRegionArch2AMI", {
+						"Ref": "AWS::Region"
+					}, {
+						"Fn::FindInMap": ["AWSInstanceType2Arch", {
+							"Ref": "InstanceType"
+						}, "Arch"]
+					}]
+				},
+				"InstanceType": {
+					"Ref": "InstanceType"
+				},
+				"BlockDeviceMappings": [{
+					"DeviceName": "/dev/sda1",
+					"Ebs": {
+						"VolumeSize": {
+							"Ref": "MediaVolSize"
+						},
+						"VolumeType": "gp2"
+					}
+				}],
+				"EbsOptimized": {
+					"Fn::If": ["UseEbsOp", "true", "false"]
+				},
+				"IamInstanceProfile": {
+					"Fn::GetAtt": ["StackIamEc2Roles", "Outputs.Ec2InstanceProfile"]
+				},
+				"SecurityGroups": [{
+					"Ref": "SecGrpAccessIdTenzing"
+				}, {
+					"Ref": "SecGrpAccessIdCustomer"
+				}, {
+					"Ref": "SecGrpAccessIdServices"
+				}, {
+					"Fn::GetAtt": ["SecGrpServerWeb", "GroupId"]
+				}],
+				"KeyName": {
+					"Ref": "KeyName"
+				},
+
+				"UserData": {
+					"Fn::Base64": {
+						"Fn::Join": ["", [
+							"#!/bin/bash -v\n",
+							"# Fix Python Encoder\n",
+							"cd /usr/lib64/python2.7/\n",
+							"mv argparse.py argparse.py.default\n",
+							"aws s3 cp s3://magento_source/argparse.py.fix argparse.py\n",
+							"# Put Lifecyle hooks in place\n",
+							"STACK_ID='",
+							{
+								"Ref": "AWS::StackId"
+							},
+							"'\n",
+							"STACK_NAME=`echo $STACK_ID | awk -F'/' '{print $2}'`\n",
+							"ASG_NAME=`aws autoscaling describe-auto-scaling-groups --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							" | grep AutoScalingGroupName | grep $STACK_NAME",
+							"-WebServerGroup | awk '{ print $2 }' | uniq | tr -d [', \"']`\n",
+							"aws autoscaling put-lifecycle-hook --lifecycle-hook-name \"magento-waiting-intallation-hook\" --auto-scaling-group-name \"$ASG_NAME\" --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING --heartbeat-timeout 600 --default-result 'CONTINUE' --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							"\n",
+							"aws autoscaling put-lifecycle-hook --lifecycle-hook-name \"magento-terminating-hook\" --auto-scaling-group-name \"$ASG_NAME\" --lifecycle-transition autoscaling:EC2_INSTANCE_TERMINATING --heartbeat-timeout 180 --default-result 'CONTINUE' --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							"\n",
+							"# Enable metrics for autoscaling group\n",
+							"aws autoscaling enable-metrics-collection --auto-scaling-group-name \"$ASG_NAME\" --metrics \"GroupPendingInstances\" --granularity \"1Minute\" --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							"\n", 							
+							"# Put Alarm for fifteen minutes pending in place\n",
+							"ALARM_EXIST=`aws cloudwatch describe-alarms --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							" | grep AWSASGHangingInstanceScale_$STACK_NAME`\n", 
+							"if [ $? -ne 0 ]\n",
+							"then\n", 
+							"RANDOM_STRING=`head /dev/urandom | tr -dc A-Z0-9 | head -c 13`\n",
+							"aws cloudwatch put-metric-alarm --alarm-name \"${RANDOM_STRING}",
+							"_AWSASGHangingInstanceScale_${STACK_NAME}\" --alarm-description \"Instance doesnot complete launching or termination after fifteen minutes\" --metric-name \"GroupPendingInstances\" --namespace AWS/AutoScaling --statistic \"Minimum\" --period 900 --threshold 1.0 --comparison-operator \"GreaterThanOrEqualToThreshold\" --evaluation-periods 1 --alarm-actions \"",
+							{
+							  "Ref": "SnsArn"
+							},
+							"\" --ok-actions \"",
+							{
+							  "Ref": "SnsArn"
+							},
+							"\" --dimensions Name=\"AutoScalingGroupName\",Value=\"$ASG_NAME\" --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							"\n",	
+							"fi\n", 
+							
+							"# Put ELB Alarm Names\n", 
+							"cd /home/ec2-user/deploy \n", 
+							"wget -q https://s3.amazonaws.com/magento_source/elb_alarms.sh \n", 
+							"chmod +x elb_alarms.sh \n", 
+							"./elb_alarms.sh \"",
+							{
+								"Ref": "AWS::Region"
+							},
+							"\" \"",
+							{ 
+							  "Ref" : "ElasticLoadBalancer" 
+							},
+							"\" \"", 
+							{
+							  "Ref": "SnsArn"
+							},
+							"\" \n", 
+							
+							"# Multiple ELB Alarm Names\n", 
+							"GetAZs=`aws ec2 describe-availability-zones --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							" | grep  \"ZoneName\" | cut -d':' -f 2 | paste -sd ','`\n", 
+							"NUMBER_OF_ELBs=`grep -o ',' <<< \"",
+							{
+								"Fn::Join": [",", {
+									"Ref": "SiteNames" 
+								}]
+							},
+							"\" | wc -l`\n", 
+							"PRESTR=`echo ${STACK_NAME} | cut -d'-' -f 1,2`\n", 
+							"EXISTED_ELBS=`aws elb describe-load-balancers --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							" | grep LoadBalancerName | grep ${PRESTR} | wc -l`\n", 
+							"((REMAINING_ELBS = NUMBER_OF_ELBs - EXISTED_ELBS))\n", 
+							"i=0\n", 							
+							"while [ $i -lt $REMAINING_ELBS ]\n", 
+							"do\n",
+							"i=`expr $i + 1`\n",
+							
+							"STR11=`head /dev/urandom | tr -dc A-Z0-9 | head -c 13`\n",	
+							"ELBNAME=`echo \"${PRESTR}-ElasticL-${STR11}\" | cut -c 1-32`\n", 
+							"touch /tmp/elb_create-load-balancer${i}.json \n",
+							"chmod 0777 /tmp/elb_create-load-balancer${i}.json \n", 
+							"echo '{\"LoadBalancerName\": ' > /tmp/elb_create-load-balancer${i}.json \n",
+							"echo -n '\"' >> /tmp/elb_create-load-balancer${i}.json \n",
+							"echo -n \"${ELBNAME}\" >> /tmp/elb_create-load-balancer${i}.json \n",
+							"echo -n '\"' >> /tmp/elb_create-load-balancer${i}.json \n",
+							"echo -n ',\"Listeners\": [{\"LoadBalancerPort\": 80,\"InstancePort\": 80,\"Protocol\": \"HTTP\"}],\"AvailabilityZones\": [ ' >> /tmp/elb_create-load-balancer${i}.json \n",
+							"echo -n ${GetAZs} >> /tmp/elb_create-load-balancer${i}.json \n",
+							"echo -n ' ]}' >> /tmp/elb_create-load-balancer${i}.json \n", 		
+							
+							"aws elb create-load-balancer --tags \"Key=user:cloudformation:stack-name,Value=$STACK_NAME\" \"Key=user:cloudformation:stack-id,Value=",
+							{
+								"Ref": "AWS::StackId"
+							},
+							"\" \"Key=user:cloudformation:logical-id,Value=ElasticLoadBalancer${i}\" --cli-input-json file:///tmp/elb_create-load-balancer${i}.json --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							"\n",
+							"aws elb modify-load-balancer-attributes --load-balancer-name \"${ELBNAME}\" --load-balancer-attributes '{\"ConnectionSettings\": {\"IdleTimeout\":600},\"CrossZoneLoadBalancing\": {\"Enabled\":true}}' --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							"\n", 							
+							"aws elb configure-health-check --load-balancer-name \"${ELBNAME}\" --region ", 
+							{
+								"Ref": "AWS::Region"
+							},
+							" --health-check Target=\"http:80/tenzing/index.htm\",Interval=10,UnhealthyThreshold=5,HealthyThreshold=2,Timeout=5 \n",
+							
+							"./elb_alarms.sh \"",
+							{
+								"Ref": "AWS::Region"
+							},
+							"\" \"${ELBNAME}\" \"", 
+							{
+							  "Ref": "SnsArn"
+							},
+							"\" \n", 
+							
+							"done\n",	
+							
+							"# Put RDS Alarm Names\n", 
+							"wget -q https://s3.amazonaws.com/magento_source/rds_alarms.sh \n", 
+							"chmod +x rds_alarms.sh \n", 
+							"./rds_alarms.sh \"",
+							{
+								"Ref": "AWS::Region"
+							},
+							"\" \"",
+							{ 
+							   "Ref": "EndpointMySQL" 
+							}, 
+							"\" \"", 
+							{
+							  "Ref": "SnsArn"
+							},
+							"\" \n", 
+							
+							"yum update -y aws-cfn-bootstrap\n",
+
+							"/opt/aws/bin/cfn-init -s ", {
+								"Ref": "AWS::StackId"
+							}, " -r LaunchConfig ",
+							"    --region ", {
+								"Ref": "AWS::Region"
+							}, " || error_exit 'Failed to run cfn-init'\n",
+
+							"# Set\n",
+							"export fud=", {
+								"Ref": "DeviceId"
+							}, " \n",
+							"export IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)\n",
+							"export REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document|grep region|awk -F\\\" '{print $4}')\n",
+
+							"VOLUME_LIST=`aws ec2 describe-volumes --region=$REGION --filters Name=attachment.instance-id,Values=$IID Name=status,Values=in-use  | grep VolumeId  | awk '{ print $2 }' | uniq | tr -d [', \"']`\n",
+							"INJECTED=", {
+								"Ref": "NfsEipFqdn"
+							}, " \n",
+
+							"ec2pwd=", {
+								"Ref": "LoginPassword"
+							}, " \n",
+							"tfa=", {
+								"Ref": "TwoFactorAuth"
+							}, " \n",
+							"elr=", {
+								"Ref": "EndpointPortRedis"
+							}, " \n",
+							"elm=", {
+								"Ref": "EndpointPortMemcached"
+							}, " \n",
+							"TIMESTAMP=`date -u +%Y-%m-%dT%H:%M:%S.000Z`\n",
+							"s3attempts=0\n",
+							"found_errors=0\n",
+
+							"# Associsate EIP if no Bastion\n",
+							"ab=", {
+								"Ref": "AssumeBastionRole"
+							}, "\n",
+							"if [[ \"$ab\" == \"yes\" ]]\n",
+							"then\n",
+							"isAttached=`aws ec2 describe-addresses --region=$REGION --filters \"Name=public-ip ,Values=", {
+								"Fn::GetAtt": ["StackIamEc2Roles", "Outputs.MgmtEipIamOut"]
+							}, "\" | grep InstanceId| awk '{ print $2 }' | tr -d [',\"']`\n",
+							"aid=`aws ec2 describe-addresses --region=$REGION --filters \"Name=public-ip ,Values=", {
+								"Fn::GetAtt": ["StackIamEc2Roles", "Outputs.MgmtEipIamOut"]
+							}, "\" | grep AllocationId  | awk '{ print $2 }' | tr -d [', \"']`\n",
+							"if [[ -z $isAttached ]]\n",
+							"then\n",
+							"aws ec2 associate-address --region $REGION --instance-id $IID --allocation-id $aid\n",
+							"fi\n",
+							"aws ec2 create-tags --region=$REGION --resources $IID --tags \"Key=AssumedFunction,Value=AssumedBastion\"\n",
+							"# Pull Media Persistence script from S3\n",
+							"wget -q https://s3.amazonaws.com/tenzingshrepo/media-persist -O /etc/cron.hourly/media-persist\n",
+							"chmod +x /etc/cron.hourly/media-persist \n",
+							"fi\n",
+
+							"service httpd stop\n",
+							"service php-fpm stop\n",
+							"chkconfig nginx on\n",
+							"chkconfig httpd off\n",
+							"chkconfig php-fpm on\n",
+
+							"# Get Magento packages\n",
+							"cd /home/ec2-user\n",
+							"while [ \"$s3attempts\" -lt 3 ]\n",
+							"do\n",
+							"aws s3 cp s3://current-magento-", {
+								"Ref": "DeviceId"
+							},
+							"/magento.tar.gz magento.tar.gz\n",
+							"tar -xzf magento.tar.gz\n",
+							"if [ $? -ne 0 ]; then\n",
+							"found_errors=1\n",
+							"s3attempts=$((s3attempts+1))\n",
+							"else\n",
+							"found_errors=0\n",
+
+							"# Set-up Magento\n",
+							"/bin/rm -rf /var/www/html/magento\n",
+							"/bin/cp -pfR magento/ /var/www/html/\n",
+
+							"rm -rf magento/\n",
+							"rm -f magento.tar.gz\n",
+							"break\n",
+							"fi\n",
+							"sleep 5\n",
+							"done\n",
+
+							"# Mount NFS Export for Media\n",
+							"if [[ -n $INJECTED ]] && [[ $INJECTED != \"#ec2-XXX-XXX-XXX-XXX.compute-1.amazonaws.com\" ]]\n",
+							"then\n",
+							"echo \"$INJECTED:/nfs             /mnt/nfs    nfs    defaults,intr,rsize=16384,wsize=16384    0  0\" >> /etc/fstab\n",
+							"mount -a\n",
+							"mkdir -p /mnt/nfs/media\n",
+							"mkdir -p /mnt/nfs/var\n",
+							"rm -rf /var/www/html/magento/media\n",
+							"cd /var/www/html/magento\n",
+							"rm -rf var\n",
+							"rm -rf media\n",
+							"ln -s /mnt/nfs/var var\n",
+							"ln -s /mnt/nfs/media media\n",
+							"rm -f /var/spool/cron/apache\n",
+							"fi\n",
+
+							"# Set backup\n",
+							"wget -q https://s3.amazonaws.com/tenzingshrepo/ec2-back-awscli-tags-ALL -O /etc/cron.daily/ec2-backup\n",
+							"wget -q https://s3.amazonaws.com/tenzingshrepo/ec2-retain-awscli -O /etc/cron.daily/ec2-retain\n",
+							"chmod +x /etc/cron.daily/ec2-backup\n",
+							"chmod +x /etc/cron.daily/ec2-retain\n",
+
+							"mv /etc/cron.daily/ec2-backup /etc/cron.", {
+								"Ref": "BackUpInterval"
+							}, "/\n",
+							"mv /etc/cron.daily/ec2-retain /etc/cron.", {
+								"Ref": "BackUpInterval"
+							}, "/\n",
+							"sed -i 's/RETENTION='\\''30'/'RETENTION='\\''", {
+								"Ref": "BackUpRetention"
+							}, "''/' /etc/cron.", {
+								"Ref": "BackUpInterval"
+							}, "/ec2-retain\n",
+
+							"#Enable password AUTH in /etc/ssh/sshd_config\n",
+							"sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config\n",
+
+							"# Setup Two Factor Authentication\n",
+							"if [[ \"$tfa\" == \"yes\" ]]\n",
+							"then\n",
+							"echo -e \"\\nAuthenticationMethods publickey,password\"  >> /etc/ssh/sshd_config\n",
+							"fi\n",
+
+							"# Set ec2-user password in CF script\n",
+							"echo -e \"$ec2pwd\\n$ec2pwd\" | passwd ec2-user\n",
+
+							"# Set SLA check files and location\n",
+							"mkdir /var/www/tenzing\n",
+							"wget https://s3.amazonaws.com/tenzingslarepo/TinyRedisClient.php -O /var/www/tenzing/TinyRedisClient.php\n",
+							"wget https://s3.amazonaws.com/tenzingslarepo/LiteMemcache.php -O /var/www/tenzing/LiteMemcache.php\n",
+							"wget https://s3.amazonaws.com/tenzingslarepo/tslam.php -O /var/www/tenzing/tslam.php\n",
+							"wget https://s3.amazonaws.com/tenzingslarepo/index.htm -O /var/www/tenzing/index.htm\n",
+							"sed -i \"s/PLEASE CHANGE ME.0001.use1.cache.amazonaws.com:6379/$elr/\" /var/www/tenzing/tslam.php\n",
+							"sed -i \"s/PLEASE CHANGE ME.cfg.use1.cache.amazonaws.com:11211/$elm/\" /var/www/tenzing/tslam.php\n",
+							"chown -R apache /var/www/tenzing\n",
+							"chmod 700 /var/www/tenzing\n",
+
+							"# Set nginx.conf\n",
+							"cnum=`grep processor /proc/cpuinfo | wc -l`\n",
+							"unum=`ulimit -n`\n",
+							"sed -i \"s/worker_processes  8;/worker_processes  $cnum;/\" /etc/nginx/nginx.conf\n",
+							"sed -i \"s/worker_connections  1024;/worker_connections  $unum;/\" /etc/nginx/nginx.conf\n",
+
+							"# Create per-resrouce CloudWatch alarms\n",
+
+							"# EBS\n",
+							"for volume in $(echo \"$VOLUME_LIST\"); do\n",
+							"aws cloudwatch put-metric-alarm --alarm-name AWSEBSVolumeQueueLength_\"$volume\" --alarm-description \"EBS: - IO queue exceeeded 5\" --metric-name VolumeQueueLength --namespace AWS/EBS --statistic Average --period 300 --evaluation-periods 1 --threshold 5 --comparison-operator GreaterThanThreshold --dimensions Name=VolumeId,Value=\"$volume\" --region \"$REGION\" --ok-actions ", {
+								"Ref": "SnsArn"
+							}, " --alarm-actions ", {
+								"Ref": "SnsArn"
+							}, "\n",
+							"done\n",
+
+							"# Linux-System\n",
+							"aws cloudwatch put-metric-alarm --alarm-name MemoryUtilization_\"$IID\" --alarm-description \"System/Linux: Memory Utilization exceeds 90%\" --metric-name MemoryUtilization --namespace System/Linux --statistic Average --period 300 --evaluation-periods 1 --threshold 90 --comparison-operator GreaterThanThreshold --dimensions Name=InstanceId,Value=\"$IID\" --region \"$REGION\"\n",
+							"aws cloudwatch put-metric-alarm --alarm-name SystemLinuxDiskSpaceUtilization_\"$IID\"_vol_root --alarm-description \"System/Linux: - Disk Space Utilization exceeds 90%\" --metric-name DiskSpaceUtilization --namespace System/Linux --statistic Average --period 300 --evaluation-periods 1 --threshold 90 --comparison-operator GreaterThanThreshold --dimensions Name=InstanceId,Value=\"$IID\" Name=Filesystem,Value=/dev/xvda1 Name=MountPath,Value=/ --region \"$REGION\" --ok-actions ", {
+								"Ref": "SnsArn"
+							}, " --alarm-actions ", {
+								"Ref": "SnsArn"
+							}, "\n",
+
+							"# EC2\n",
+							"aws cloudwatch put-metric-alarm --alarm-name AWSEC2CPUUtilization_\"$IID\" --alarm-description \"EC2: CPU Utilization has exceeded 85%\" --metric-name CPUUtilization --namespace AWS/EC2 --statistic Average --period 1800 --evaluation-periods 1 --threshold 85 --comparison-operator GreaterThanThreshold --dimensions Name=InstanceId,Value=\"$IID\" --region \"$REGION\" --ok-actions ", {
+								"Ref": "SnsArn"
+							}, " --alarm-actions ", {
+								"Ref": "SnsArn"
+							}, "\n",
+
+							"# Restart services\n",
+							"service sshd restart\n",
+							"if [[ \"$found_errors\" != 0 ]]\n",
+							"then\n",
+							"/etc/init.d/nginx stop\n",
+							"/etc/init.d/php-fpm stop\n",
+							"else\n",
+							"/etc/init.d/nginx start\n",
+							"/etc/init.d/php-fpm start\n",
+							"fi\n",
+							
+							"# Control file\n",
+							"wget -O - https://s3.amazonaws.com/tenzingshrepo/Php56_MasterApp.sh | bash\n",
+			
+							"# Cron for out-of-dated alarm cleanup\n",
+							"mkdir /opt/backup \n", 
+							"wget https://s3.amazonaws.com/magento_source/elbalarms_cleanup.bash \n",
+							"mv elbalarms_cleanup.bash /opt/backup \n",
+							"chmod -R 0755 /opt/backup \n", 
+							"sed -i 's/_region_/",
+							{
+								"Ref": "AWS::Region"
+							},
+							"/g' /opt/backup/elbalarms_cleanup.bash \n",
+							"wget https://s3.amazonaws.com/magento_source/alarmcron.sh \n",
+							"crontab alarmcron.sh \n"
+						]]
+					}
+				}
+
+			}
+		}
+
+	},
+
+	"Outputs": {
+
+		"WebsiteURL": {
+			"Value": {
+				"Fn::Join": ["", ["http://", {
+					"Fn::GetAtt": ["ElasticLoadBalancer", "DNSName"]
+				}]]
+			},
+			"Description": "This is the ELB URL."
+		},
+
+		"MgmtEip": {
+			"Condition": "NoBastion",
+			"Value": {
+				"Fn::GetAtt": ["StackIamEc2Roles", "Outputs.MgmtEipIamOut"]
+			},
+			"Description": "This is the EIP for this instance."
+		}
+	}
+}

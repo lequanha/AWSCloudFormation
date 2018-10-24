@@ -1,0 +1,202 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "10.22.2014 - Creates : RDS instance and Parameter Group creation.",
+
+  "Parameters" : {
+
+    "DeviceId" : {
+      "Description" : "Enter the Device ID to tag on the stack and its components",
+      "Type" : "String",
+      "AllowedPattern" : "[\\x20-\\x7E]*"
+    },
+
+    "SecGrpAccessIdServices": {
+      "Default": "sg-xxxxxxxx",
+      "Description" : "Enter the ID of SecGrpAccessIdServices (as seen in the output of the AccessSecurityGroup creation stack)",
+      "Type": "String",
+      "MinLength": "11",
+      "MaxLength": "15",
+      "AllowedPattern" : "[\\x20-\\x7E]*",
+      "ConstraintDescription" : "Value must contain between 11-15 ASCII characters"
+    },
+
+   "SecGrpAccessIdBastion": {
+     "Default": "sg-xxxxxxxx",
+     "Description" : "Enter the SecGrpAccessIdBastion (as seen in the output of the AccessSecurityGroup creation stack)",
+     "Type": "String",
+     "MinLength": "11",
+     "MaxLength": "15",
+     "AllowedPattern" : "[\\x20-\\x7E]*",
+     "ConstraintDescription" : "Value must contain between 11-15 ASCII characters"
+    },
+
+   "DBName": {
+     "Default": "magento",
+     "Description" : "Enter the database name for the newly created MySQL database",
+     "Type": "String",
+     "MinLength": "1",
+     "MaxLength": "64",
+     "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+     "ConstraintDescription" : "Value must must begin with a letter and contain only alphanumeric characters"
+    },
+
+    "DBUsername": {
+      "NoEcho": "false",
+      "Description" : "Enter the username for access to the newly created MySQL database",
+      "Type": "String",
+      "MinLength": "1",
+      "MaxLength": "16",
+      "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+      "ConstraintDescription" : "Value must must begin with a letter and contain only alphanumeric characters"
+    },
+
+    "DBPassword": {
+      "NoEcho": "true",
+      "Description" : "Enter the password for the newly created MySQL database access",
+      "Type": "String",
+      "MinLength": "8",
+      "MaxLength": "41",
+      "AllowedPattern" : "[\\x20-\\x7E]*",
+      "ConstraintDescription" : "Value must be a minimum of 8 characters"
+    },
+
+    "DBAllocatedStorage": {
+      "Default": "100",
+      "Description" : "Enter the size of the newly created MySQL database (GiB)",
+      "Type": "Number",
+      "MinValue": "5",
+      "MaxValue": "3072",
+      "ConstraintDescription" : "Value must must be between 5 and 1024GB. 100GB min required for Provisioned IOPs"
+    },
+
+    "DBInstanceClass": {
+      "Default": "db.m3.large",
+      "Description" : "Enter the database instance type",
+      "Type": "String",
+      "AllowedValues" : [ "db.t2.micro", "db.m1.small", "db.m3.medium", "db.m3.large", "db.m3.xlarge", "db.m3.2xlarge", "db.m2.xlarge", "db.m2.2xlarge", "db.m2.4xlarge", "db.r3.large", "db.r3.xlarge", "db.r3.2xlarge" ],
+      "ConstraintDescription" : "Value must must select a valid database instance type"
+    },
+
+    "DBBackupRetension": {
+      "Default": "30",
+      "Description" : "Enter the number of days DB backups are retained",
+      "Type": "Number",
+      "MinValue": "1",
+      "MaxValue": "60",
+      "ConstraintDescription" : "Value must must be between 1 and 60"
+    },
+
+    "EnableProvisionedIOPs" : {
+      "Description" : "Indicate 'yes' for Provisioned IOPs, or 'no' for none",
+      "Type" : "String",
+      "AllowedValues" : [ "yes","no"],
+      "ConstraintDescription" : "Value must be 'yes' or 'no'"
+    },
+
+    "EnterProvisionedIOPs": {
+      "Default": "1000",
+      "Description" : "Enter the total amount of provisoined IOPs. Ignore if pIOPs will not be used",
+      "Type": "Number",
+      "MinValue": "1000",
+      "MaxValue": "30000",
+      "ConstraintDescription" : "Value must must be minimum of 1000 Provisoined IOPs and 100GB storage capacity"
+    },
+
+    "EnableMultiAz" : {
+      "Default" : "yes",
+      "Description" : "Indicate 'yes' for Multi-AZ, or 'no' ONLY for Development stack deployments",
+      "Type" : "String",
+      "AllowedValues" : [ "yes","no"],
+      "ConstraintDescription" : "Value must be either 'yes', or 'no'"
+    }
+
+  },
+
+  "Conditions": {
+    "UsePiops" : { "Fn::Equals": [ {"Ref": "EnableProvisionedIOPs"}, "yes" ] },
+    "UseMultiAz" : { "Fn::Equals": [ {"Ref": "EnableMultiAz"}, "yes" ] }
+  },
+
+
+  "Resources" : {
+
+    "SecGrpServerRds": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "RDS Security Group",
+        "SecurityGroupIngress": [
+          { "IpProtocol": "tcp", "FromPort": "3306", "ToPort": "3306", "SourceSecurityGroupId": { "Ref": "SecGrpAccessIdServices" } },
+          { "IpProtocol": "tcp", "FromPort": "3306", "ToPort": "3306", "SourceSecurityGroupId": { "Ref": "SecGrpAccessIdBastion" } },
+          { "IpProtocol": "icmp", "FromPort": "-1", "ToPort": "-1", "SourceSecurityGroupId": { "Ref" : "SecGrpAccessIdBastion" } }
+        ]
+      }
+    },
+
+    "dbpgmageeopt": {
+      "Type": "AWS::RDS::DBParameterGroup",
+      "Properties": {
+        "Description": "MagentoOptimized",
+        "Family": "mysql5.6",
+        "Parameters": {
+          "binlog_cache_size": "32768",
+          "innodb_thread_concurrency" : "10",
+          "key_buffer_size" : "536870912",
+          "log_bin_trust_function_creators" : "1",
+          "max_allowed_packet" : "67108864",
+          "myisam_sort_buffer_size" : "67108864",
+          "query_cache_limit" : "2097152",
+          "query_cache_size" : "100663296",
+          "query_cache_type" : "1",
+          "read_buffer_size" : "4194304",
+          "read_rnd_buffer_size" : "2097152",
+          "sort_buffer_size" : "4194304",
+          "table_open_cache" : "1024",
+          "tmp_table_size" : "134217728",
+          "wait_timeout" : "300",
+          "explicit_defaults_for_timestamp": "1",
+          "innodb_buffer_pool_size": "{DBInstanceClassMemory*3/4}",
+          "innodb_file_per_table": "1",
+		  "optimizer_search_depth" : "7",
+		  "tx_isolation" : "READ-COMMITTED",
+		  "binlog_format" : "ROW"
+        }
+      }
+    },
+
+    "magento": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "Engine" : "MySQL",
+        "DBName" : { "Ref": "DBName" },
+        "AutoMinorVersionUpgrade": "true",
+        "Iops": { "Fn::If" : [ "UsePiops", {"Ref" : "EnterProvisionedIOPs"}, {"Ref" : "AWS::NoValue"} ] },
+        "BackupRetentionPeriod": { "Ref": "DBBackupRetension" },
+        "PreferredBackupWindow": "08:45-09:15",
+        "PreferredMaintenanceWindow": "sun:08:00-sun:08:30",
+        "DBParameterGroupName": { "Ref": "dbpgmageeopt" },
+        "MultiAZ" : { "Fn::If" : [ "UseMultiAz", "true", "false" ] },
+        "MasterUsername": { "Ref": "DBUsername" },
+        "MasterUserPassword": { "Ref" : "DBPassword" },
+        "DBInstanceClass": { "Ref" : "DBInstanceClass" },
+        "VPCSecurityGroups": [{"Fn::GetAtt": [ "SecGrpServerRds", "GroupId"]}],
+        "Tags" : [ { "Key" : "DeviceId", "Value" : { "Ref" : "DeviceId" } } ],
+        "AllocatedStorage": { "Ref" : "DBAllocatedStorage" },
+        "PubliclyAccessible" : "false",
+        "StorageType" : { "Fn::If" : [ "UsePiops", "io1", "gp2" ] }
+      }
+    }
+  },
+
+  "Outputs" : {
+    "DBConnectionName" : {
+       "Value" : { "Fn::GetAtt": [ "magento", "Endpoint.Address" ] },
+       "Description" : "DNS name for this RDS instance."
+    },
+
+    "DatabaseName" : {
+       "Value" : { "Ref": "DBName" },
+       "Description" : "Name of pre-created database"
+    }
+  }
+}
